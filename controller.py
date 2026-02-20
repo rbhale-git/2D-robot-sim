@@ -175,9 +175,11 @@ class Controller:
 
         n = len(ranges)
 
-        # Front sector: middle third of the ray array (~±30° for 180° FOV)
-        f_start = n // 3
-        f_end = 2 * n // 3
+        # Front sector: middle two-thirds of the ray array (~±60° for 180° FOV).
+        # Wider than the original ±30° so obstacles off to the side-front trigger
+        # avoidance before the robot is already committed to a collision course.
+        f_start = n // 6
+        f_end = 5 * n // 6
         min_front = float(np.min(ranges[f_start:f_end]))
 
         if min_front < self.avoid_dist:
@@ -185,11 +187,16 @@ class Controller:
             speed_scale = clamp(min_front / self.avoid_dist, 0.0, 1.0)
             v *= speed_scale
 
-            # Threat = sum of inverse distances (closer → higher threat)
-            left_threat = float(np.sum(1.0 / (ranges[: n // 2] + 0.1)))
-            right_threat = float(np.sum(1.0 / (ranges[n // 2 :] + 0.1)))
+            # Ray angle layout: linspace(-fov/2, +fov/2)
+            #   ranges[:n//2]  → negative angle offsets → clockwise from heading → RIGHT side
+            #   ranges[n//2:]  → positive angle offsets → counter-clockwise      → LEFT side
+            # (Positive omega = CCW = turning left)
+            right_threat = float(np.sum(1.0 / (ranges[: n // 2] + 0.1)))
+            left_threat  = float(np.sum(1.0 / (ranges[n // 2 :] + 0.1)))
 
-            # Positive omega = CCW (turn left); steer away from the more-threatened side
+            # Steer away from the more-threatened side:
+            #   right_threat > left_threat  → turn left  (+ omega)
+            #   left_threat  > right_threat → turn right (− omega)
             avoid_omega = self.avoid_gain * (right_threat - left_threat)
             omega = clamp(omega + avoid_omega, -3.0, 3.0)
 

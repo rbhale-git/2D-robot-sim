@@ -56,8 +56,10 @@ controller = Controller(
 
 planner = AStarPlanner(resolution=GRID_RES)
 
-# Build occupancy grid once (world is static)
-occ_grid, origin_x, origin_y = world.build_occupancy_grid(GRID_RES, robot.radius)
+# Build occupancy grid once (world is static).
+# Use robot.radius + half a grid cell as the inflation margin so A* paths
+# have a comfortable clearance and don't hug obstacle surfaces.
+occ_grid, origin_x, origin_y = world.build_occupancy_grid(GRID_RES, robot.radius + GRID_RES / 2)
 
 # ─── Shared mutable state ─────────────────────────────────────────────────────
 goal = [8.0, 8.0]

@@ -15,10 +15,10 @@ class LidarSensor:
     for each ray.  Rays hit circular obstacles or world-boundary walls,
     whichever is closer.
 
-    Ray angle convention
-    --------------------
-    ray_angles[0] = -fov/2  (leftmost ray, relative to robot heading)
-    ray_angles[-1] = +fov/2 (rightmost ray)
+    Ray angle convention  (standard math: CCW = positive)
+    -------------------------------------------------------
+    ray_angles[0]  = -fov/2  → clockwise from heading      → RIGHT side of robot
+    ray_angles[-1] = +fov/2  → counter-clockwise from heading → LEFT side of robot
     """
 
     def __init__(
