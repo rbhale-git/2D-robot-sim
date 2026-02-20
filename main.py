@@ -105,13 +105,20 @@ for spine in ax.spines.values():
 obstacle_patches: list = []   # kept so we can remove them on randomize
 
 def draw_obstacles() -> None:
-    """Remove any existing obstacle patches and draw the current world.obstacles."""
+    """Remove any existing obstacle patches and draw the current world.obstacles.
+
+    Each patch is marked set_animated(True) so the blit mechanism treats it as
+    a dynamic artist rather than capturing it into the static background.  The
+    patches are also included in the sim_step return tuple, which guarantees
+    they are redrawn every frame and are never left behind in a stale background.
+    """
     global obstacle_patches
     for p in obstacle_patches:
         p.remove()
     obstacle_patches.clear()
     for ox, oy, or_ in world.obstacles:
         p = plt.Circle((ox, oy), or_, color="#e94560", alpha=0.85, zorder=3)
+        p.set_animated(True)   # exclude from blit background; redrawn each frame
         ax.add_patch(p)
         obstacle_patches.append(p)
 
@@ -219,18 +226,31 @@ def _random_world(rng: np.random.Generator) -> None:
 
 def on_randomize(_event) -> None:
     """Button callback: generate a new random world, goal, and replan."""
+    global lidar_ranges
+
     rng = np.random.default_rng()
     _random_world(rng)
 
-    # Redraw obstacles (remove old patches, add new ones)
+    # Rebuild obstacle patches for the new layout.
+    # set_animated(True) is applied inside draw_obstacles() so the patches are
+    # treated as dynamic artists and included in the sim_step blit return.
     draw_obstacles()
     goal_marker.set_data([goal[0]], [goal[1]])
 
     replan()
 
-    # Force a full canvas redraw so the blit background picks up the new
-    # obstacle patches before the animation resumes blitting over it.
-    fig.canvas.draw()
+    # Rescan LIDAR immediately so the first animation frame after this click
+    # already carries correct ranges for the new world, not stale values from
+    # whatever the robot was doing before randomization.
+    lidar_ranges = lidar.scan(
+        robot.x, robot.y, robot.theta,
+        world.obstacles, world.width, world.height,
+    )
+
+    # draw_idle() schedules a redraw without processing the full Tk event queue,
+    # which avoids the race where a queued sim_step fires mid-callback with
+    # partially updated state.
+    fig.canvas.draw_idle()
 
 
 # ─── Randomize button ─────────────────────────────────────────────────────────
@@ -322,10 +342,14 @@ def sim_step(_frame):
         + ("★ GOAL REACHED ★" if reached else "")
     )
 
+    # obstacle_patches is included here so they are blit-managed (redrawn every
+    # frame) rather than baked into the static background.  This means the
+    # animation always shows the current world.obstacles, even after randomize.
     return (
         robot_patch, heading_line, trail_line, path_line,
         goal_marker, status_text,
         *lidar_ray_lines,
+        *obstacle_patches,
     )
 
 
