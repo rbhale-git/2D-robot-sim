@@ -4,13 +4,18 @@ and reactive LIDAR-based obstacle avoidance.
 
 Tuning guide
 ------------
-kp_omega  : Proportional heading gain.  Increase → faster turns; too high → oscillation.
-            Typical range: 2–5.
-kd_omega  : Derivative heading gain.  Damps oscillation.  Typical range: 0.1–0.6.
-max_v     : Linear speed cap (m/s).  Lower = safer; higher = faster travel.
-avoid_dist: LIDAR range threshold that triggers reactive avoidance (m).
-            ~0.4–0.8 works well for the default world.
-avoid_gain: Strength of the avoidance steering term.  Typical: 0.5–2.0.
+kp_omega    : Proportional heading gain.  Increase → faster turns; too high → oscillation.
+              Typical range: 2–5.
+kd_omega    : Derivative heading gain.  Critical for damping.
+              Damping ratio ζ = kd / (2 * sqrt(kp)).  Target ζ ≈ 0.7 (near-critical).
+              With kp=3.5 that means kd ≈ 2.6.  Typical range: 1.5–3.0.
+omega_smooth: EMA smoothing factor for the output omega command (0 < alpha ≤ 1).
+              Lower = smoother but more lag; higher = more responsive but more jitter.
+              0.2–0.35 works well in practice.
+max_v       : Linear speed cap (m/s).  Lower = safer; higher = faster travel.
+avoid_dist  : LIDAR range threshold that triggers reactive avoidance (m).
+              ~0.4–0.8 works well for the default world.
+avoid_gain  : Strength of the avoidance steering term.  Typical: 0.5–2.0.
 """
 import math
 from typing import List, Optional, Tuple
@@ -35,7 +40,8 @@ class Controller:
     def __init__(
         self,
         kp_omega: float = 3.5,
-        kd_omega: float = 0.4,
+        kd_omega: float = 2.6,      # tuned for ζ ≈ 0.7 with kp=3.5
+        omega_smooth: float = 0.25, # EMA alpha for output omega; lower = smoother
         max_v: float = 1.0,
         goal_tolerance: float = 0.2,
         waypoint_tolerance: float = 0.35,
@@ -45,6 +51,7 @@ class Controller:
     ) -> None:
         self.kp_omega = kp_omega
         self.kd_omega = kd_omega
+        self.omega_smooth = omega_smooth
         self.max_v = max_v
         self.goal_tolerance = goal_tolerance
         self.waypoint_tolerance = waypoint_tolerance
@@ -53,6 +60,8 @@ class Controller:
         self.num_rays = num_rays
 
         self._prev_heading_error: float = 0.0
+        self._omega_prev: float = 0.0        # EMA state for output omega
+        self._avoid_omega_prev: float = 0.0  # EMA state for avoidance omega
         self._waypoints: List[Tuple[float, float]] = []
         self._wp_idx: int = 0
 
@@ -113,6 +122,9 @@ class Controller:
             wp = self.current_waypoint
             if math.hypot(wp[0] - robot_x, wp[1] - robot_y) < self.waypoint_tolerance:
                 self._wp_idx += 1
+                # Reset derivative state so the abrupt target change doesn't
+                # cause a spike in d_err = (new_error - old_error) / dt.
+                self._prev_heading_error = 0.0
             if self.has_waypoints:
                 target_x, target_y = self._waypoints[self._wp_idx]
             else:
@@ -141,6 +153,13 @@ class Controller:
         # 5. Reactive LIDAR avoidance overlay
         v, omega = self._reactive_avoidance(v, omega, lidar_ranges)
 
+        # 6. Low-pass filter on omega output.
+        #    Smooths out residual jitter from all upstream sources (PD derivative
+        #    noise, avoidance alternation, waypoint-switch transients).
+        #    omega_smooth is the EMA alpha: fraction of the new value to mix in.
+        self._omega_prev = self.omega_smooth * omega + (1.0 - self.omega_smooth) * self._omega_prev
+        omega = self._omega_prev
+
         return v, omega, False
 
     # ------------------------------------------------------------------
@@ -157,10 +176,11 @@ class Controller:
 
         Strategy
         --------
-        - Inspect the central ±30° "front sector" of the LIDAR sweep.
+        - Inspect the central ±60° "front sector" of the LIDAR sweep.
         - If any ray reads below avoid_dist → reduce speed proportionally.
-        - Compute a left/right threat imbalance across all rays and add a
-          corrective angular term (steer away from the more threatened side).
+        - Compute a left/right threat imbalance across all rays, run it through
+          an EMA filter, and add a corrective term (steer away from threat).
+        - When the obstacle clears, the avoidance term decays toward zero.
 
         Args:
             v:      Nominal linear velocity (m/s).
@@ -197,7 +217,16 @@ class Controller:
             # Steer away from the more-threatened side:
             #   right_threat > left_threat  → turn left  (+ omega)
             #   left_threat  > right_threat → turn right (− omega)
-            avoid_omega = self.avoid_gain * (right_threat - left_threat)
-            omega = clamp(omega + avoid_omega, -3.0, 3.0)
+            raw_avoid = self.avoid_gain * (right_threat - left_threat)
+
+            # EMA on the avoidance omega so it doesn't reverse sign every frame
+            # when the robot is oscillating slightly near an obstacle surface.
+            # alpha=0.35 → time constant ≈ 0.1 s at dt=0.05 s.
+            self._avoid_omega_prev = 0.35 * raw_avoid + 0.65 * self._avoid_omega_prev
+            omega = clamp(omega + self._avoid_omega_prev, -3.0, 3.0)
+        else:
+            # Obstacle has cleared — decay the avoidance term toward zero so
+            # it doesn't linger and fight the heading controller.
+            self._avoid_omega_prev *= 0.5
 
         return v, omega

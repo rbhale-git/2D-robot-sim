@@ -45,7 +45,8 @@ lidar = LidarSensor(num_rays=36, fov=math.pi, max_range=3.0)
 
 controller = Controller(
     kp_omega=3.5,
-    kd_omega=0.4,
+    kd_omega=2.6,       # ζ = kd/(2√kp) = 2.6/(2×√3.5) ≈ 0.70 → near-critically damped
+    omega_smooth=0.25,  # EMA alpha for output omega; tune down for smoother, up for snappier
     max_v=1.0,
     goal_tolerance=0.2,
     waypoint_tolerance=0.35,
