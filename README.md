@@ -1,3 +1,10 @@
+---
+title: 2D Robot Simulator Demo
+sdk: gradio
+app_file: app.py
+pinned: false
+---
+
 # 2D Autonomous Mobile Robot Simulator
 
 A top-down 2D simulation of a circular differential-drive robot navigating to a
@@ -26,6 +33,20 @@ a new goal — the robot plans a path and drives there.
 > **Backend note:** `main.py` uses the `TkAgg` backend (ships with standard
 > Python).  If you see a backend error, edit the `matplotlib.use(...)` line in
 > `main.py` to `"Qt5Agg"` or another backend available in your environment.
+
+### Hugging Face Spaces (demo sharing)
+
+This repo now includes a web demo entrypoint:
+
+```bash
+python app.py
+```
+
+For Spaces deployment:
+
+1. Create a new Hugging Face Space (SDK: `Gradio`).
+2. Push this repository to the Space repo.
+3. Spaces will install `requirements.txt` and launch `app.py`.
 
 ---
 
